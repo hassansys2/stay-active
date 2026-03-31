@@ -238,7 +238,19 @@ def nudge() -> tuple:
     return idle_after < idle_before, idle_before, idle_after
 
 
-def activity_loop(stop_event: threading.Event, interval: int, human: bool):
+def fmt_seconds(secs: int) -> str:
+    """Format a whole number of seconds as a compact human-readable string."""
+    h, rem = divmod(int(secs), 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
+def activity_loop(stop_event: threading.Event, interval: int, human: bool,
+                  start_time: float, duration: int | None):
     nudge_count = 0
     screen_w, screen_h = get_screen_size() if human else (0, 0)
 
@@ -250,13 +262,20 @@ def activity_loop(stop_event: threading.Event, interval: int, human: bool):
         nudge_count += 1
         ts = datetime.now().strftime("%H:%M:%S")
         mode = "human" if human else "nudge"
+        elapsed = time.monotonic() - start_time
+
+        if duration:
+            remaining = max(0, duration - elapsed)
+            time_info = f"left {fmt_seconds(remaining)}"
+        else:
+            time_info = f"runtime {fmt_seconds(elapsed)}"
 
         if success is None:
-            print(f"  [{ts}] {mode} #{nudge_count} — idle time unavailable", flush=True)
+            print(f"  [{ts}] {mode} #{nudge_count}  {time_info} — idle time unavailable", flush=True)
         elif success:
-            print(f"  [{ts}] {mode} #{nudge_count} — idle {idle_before:.1f}s → {idle_after:.1f}s  [OK]", flush=True)
+            print(f"  [{ts}] {mode} #{nudge_count}  {time_info} — idle {idle_before:.1f}s → {idle_after:.1f}s  [OK]", flush=True)
         else:
-            print(f"  [{ts}] {mode} #{nudge_count} — idle {idle_before:.1f}s → {idle_after:.1f}s  [FAILED — check Accessibility permission]", flush=True)
+            print(f"  [{ts}] {mode} #{nudge_count}  {time_info} — idle {idle_before:.1f}s → {idle_after:.1f}s  [FAILED — check Accessibility permission]", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -287,15 +306,19 @@ def main():
     args = parser.parse_args()
 
     mode_label = "human (Bezier)" if args.human else "nudge (small offset)"
-    duration_label = f"{args.duration}s" if args.duration else "until Ctrl+C"
-    print("=" * 50)
+    duration_label = fmt_seconds(args.duration) if args.duration else "indefinite"
+    interval_label = fmt_seconds(args.interval)
+    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    print("=" * 52)
     print("  stay_active — system awake + staying active")
-    print("=" * 50)
+    print("=" * 52)
+    print(f"  Started        : {started_at}")
     print(f"  Mode           : {mode_label}")
-    print(f"  Nudge interval : every {args.interval}s")
+    print(f"  Nudge interval : {interval_label}")
     print(f"  Duration       : {duration_label}")
     print("  Press Ctrl+C to stop.")
-    print("-" * 50)
+    print("-" * 52)
 
     print("  Checking Accessibility permission...", end=" ", flush=True)
     check_accessibility()
@@ -303,18 +326,21 @@ def main():
 
     caffeinate_proc = start_caffeinate()
     print(f"  caffeinate PID : {caffeinate_proc.pid}")
+    print("-" * 52)
 
+    start_time = time.monotonic()
     stop_event = threading.Event()
     thread = threading.Thread(
         target=activity_loop,
-        args=(stop_event, args.interval, args.human),
+        args=(stop_event, args.interval, args.human, start_time, args.duration),
         daemon=True,
     )
     thread.start()
 
     def shutdown(sig, frame):
-        print("\n" + "-" * 50)
-        print("  Stopping — restoring normal sleep behaviour.")
+        elapsed = time.monotonic() - start_time
+        print("\n" + "-" * 52)
+        print(f"  Stopping — ran for {fmt_seconds(elapsed)}. Sleep restored.")
         stop_event.set()
         caffeinate_proc.terminate()
         caffeinate_proc.wait()
