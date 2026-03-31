@@ -8,10 +8,10 @@ How it works:
      never registers an idle period.
 
 Usage:
-  python3 stay_active.py                      # default 30-second nudge interval
-  python3 stay_active.py --interval 60        # nudge every 60 seconds
-  python3 stay_active.py --human              # human-like movement across the screen
-  python3 stay_active.py --human --interval 90
+  python3 stay_active.py                          # default 30-second nudge interval
+  python3 stay_active.py --interval 60            # plain seconds
+  python3 stay_active.py --interval 2m            # 2 minutes
+  python3 stay_active.py --human --duration 1.5h  # human mode for 1.5 hours
 """
 
 import subprocess
@@ -22,6 +22,26 @@ import threading
 import argparse
 import random
 from datetime import datetime
+
+import re
+
+
+def parse_duration(value: str) -> int:
+    """
+    Parse a human-readable duration string into whole seconds.
+    Accepts: plain integers ("90"), seconds ("90s"), minutes ("15m"),
+             hours ("2h"), and decimals ("1.5h", "0.5m").
+    """
+    value = value.strip()
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([smh]?)", value, re.IGNORECASE)
+    if not match:
+        raise argparse.ArgumentTypeError(
+            f"Invalid duration '{value}'. Use formats like: 30, 30s, 15m, 1h, 1.5h"
+        )
+    amount, unit = float(match.group(1)), match.group(2).lower()
+    multiplier = {"s": 1, "m": 60, "h": 3600, "": 1}[unit]
+    return max(1, int(amount * multiplier))
+
 
 try:
     from Quartz.CoreGraphics import (
@@ -247,10 +267,10 @@ def main():
     parser = argparse.ArgumentParser(description="Keep system awake and you showing as active.")
     parser.add_argument(
         "--interval",
-        type=int,
+        type=parse_duration,
         default=30,
-        metavar="SEC",
-        help="Seconds between mouse nudges (default: 30)",
+        metavar="TIME",
+        help="Time between nudges — e.g. 30, 30s, 5m, 1h (default: 30s)",
     )
     parser.add_argument(
         "--human",
@@ -259,10 +279,10 @@ def main():
     )
     parser.add_argument(
         "--duration",
-        type=int,
+        type=parse_duration,
         default=None,
-        metavar="SEC",
-        help="Stop automatically after this many seconds (default: run until Ctrl+C)",
+        metavar="TIME",
+        help="Auto-stop after this long — e.g. 3600, 30m, 2h, 1.5h (default: indefinite)",
     )
     args = parser.parse_args()
 

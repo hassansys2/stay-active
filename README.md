@@ -34,10 +34,11 @@ Two nudge modes are available:
 That's it. `run.sh` automatically creates the venv and installs dependencies if needed, then starts the script. All arguments pass through:
 
 ```bash
-./run.sh --human                          # human-like Bezier movement
-./run.sh --interval 60                    # nudge every 60s (default: 30s)
-./run.sh --duration 3600                  # stop after 1 hour (default: indefinite)
-./run.sh --human --interval 60 --duration 7200
+./run.sh --human                            # human-like Bezier movement
+./run.sh --interval 60                      # plain seconds
+./run.sh --interval 5m                      # 5 minutes
+./run.sh --duration 2h                      # stop after 2 hours
+./run.sh --human --interval 1m --duration 1.5h
 ```
 
 Press `Ctrl+C` to stop. `caffeinate` is cleanly terminated and normal sleep behaviour is restored.
@@ -66,8 +67,8 @@ To grant it manually:
 | Flag | Default | Description |
 |---|---|---|
 | `--human` | off | Human-like Bezier movement across the full screen |
-| `--interval SEC` | `30` | Seconds between nudges |
-| `--duration SEC` | indefinite | Auto-stop after this many seconds |
+| `--interval TIME` | `30s` | Time between nudges — e.g. `30`, `30s`, `5m`, `1h` |
+| `--duration TIME` | indefinite | Auto-stop after this long — e.g. `30m`, `2h`, `1.5h` |
 
 ## Output
 
