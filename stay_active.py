@@ -8,8 +8,10 @@ How it works:
      never registers an idle period.
 
 Usage:
-  python3 stay_active.py            # default 2-minute nudge interval
-  python3 stay_active.py --interval 60   # nudge every 60 seconds
+  python3 stay_active.py                      # default 30-second nudge interval
+  python3 stay_active.py --interval 60        # nudge every 60 seconds
+  python3 stay_active.py --human              # human-like movement across the screen
+  python3 stay_active.py --human --interval 90
 """
 
 import subprocess
@@ -33,6 +35,8 @@ try:
         kCGHIDEventTap,
         kCGEventSourceStateCombinedSessionState,
         kCGAnyInputEventType,
+        CGMainDisplayID,
+        CGDisplayBounds,
     )
 except ImportError as e:
     print(f"Missing dependency: {e}. Install with:  pip install pyobjc-framework-Quartz")
@@ -107,6 +111,86 @@ def start_caffeinate():
     )
 
 
+def get_screen_size() -> tuple:
+    """Return (width, height) of the main display in points."""
+    bounds = CGDisplayBounds(CGMainDisplayID())
+    return bounds.size.width, bounds.size.height
+
+
+def _bezier(p0, p1, p2, t: float) -> tuple:
+    """Quadratic Bezier point at parameter t in [0, 1]."""
+    u = 1 - t
+    x = u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0]
+    y = u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]
+    return x, y
+
+
+def _ease_in_out(t: float) -> float:
+    return t * t * (3 - 2 * t)
+
+
+def human_nudge(screen_w: float, screen_h: float) -> tuple:
+    """
+    Move the mouse to a random screen location along a Bezier curve with
+    variable speed, micro-jitter, and irregular pauses — indistinguishable
+    from organic hand movement.
+
+    Returns (success, idle_before, idle_after).
+    """
+    ox, oy = get_mouse_position()
+
+    # Random destination anywhere on screen with a small margin
+    margin = 60
+    tx = random.uniform(margin, screen_w - margin)
+    ty = random.uniform(margin, screen_h - margin)
+
+    # Off-axis control point creates a natural curve (not a straight line)
+    cx = random.uniform(
+        min(ox, tx) - random.uniform(50, 200),
+        max(ox, tx) + random.uniform(50, 200),
+    )
+    cy = random.uniform(
+        min(oy, ty) - random.uniform(50, 200),
+        max(oy, ty) + random.uniform(50, 200),
+    )
+
+    # Scale step count with distance so speed feels consistent
+    dist = ((tx - ox) ** 2 + (ty - oy) ** 2) ** 0.5
+    steps = int(random.uniform(25, 55) * max(dist / 600, 0.4))
+    steps = max(18, min(steps, 90))
+
+    idle_before = get_idle_seconds()
+
+    for i in range(steps + 1):
+        t = i / steps
+        et = _ease_in_out(t)
+
+        # Gaussian micro-jitter — small, asymmetric, non-uniform
+        jx = random.gauss(0, random.uniform(0.3, 1.2))
+        jy = random.gauss(0, random.uniform(0.3, 1.2))
+
+        x, y = _bezier((ox, oy), (cx, cy), (tx, ty), et)
+        post_mouse_move(x + jx, y + jy)
+
+        # Speed profile: slower at start/end, faster through the arc
+        # Occasional micro-stutter simulates finger/wrist hesitation
+        base_delay = random.uniform(0.007, 0.022)
+        edge_factor = 1.0 + 1.2 * (1 - abs(2 * t - 1))  # peaks at t=0 and t=1
+        if random.random() < 0.06:          # ~6% chance of a tiny stutter
+            base_delay += random.uniform(0.03, 0.09)
+        time.sleep(base_delay * edge_factor)
+
+    # Natural pause after arriving — humans don't instantly move away
+    time.sleep(random.uniform(0.15, 0.55))
+
+    time.sleep(0.3)  # let IOKit reflect before sampling
+    idle_after = get_idle_seconds()
+
+    if idle_before < 0 or idle_after < 0:
+        return None, idle_before, idle_after
+    return idle_after < idle_before, idle_before, idle_after
+
+
 def nudge() -> tuple:
     """
     Post real CGEventMouseMoved events (not CGWarpMouseCursorPosition) so
@@ -134,20 +218,25 @@ def nudge() -> tuple:
     return idle_after < idle_before, idle_before, idle_after
 
 
-def activity_loop(stop_event: threading.Event, interval: int):
+def activity_loop(stop_event: threading.Event, interval: int, human: bool):
     nudge_count = 0
+    screen_w, screen_h = get_screen_size() if human else (0, 0)
 
     while not stop_event.wait(interval):
-        success, idle_before, idle_after = nudge()
+        if human:
+            success, idle_before, idle_after = human_nudge(screen_w, screen_h)
+        else:
+            success, idle_before, idle_after = nudge()
         nudge_count += 1
         ts = datetime.now().strftime("%H:%M:%S")
+        mode = "human" if human else "nudge"
 
         if success is None:
-            print(f"  [{ts}] nudge #{nudge_count} — idle time unavailable", flush=True)
+            print(f"  [{ts}] {mode} #{nudge_count} — idle time unavailable", flush=True)
         elif success:
-            print(f"  [{ts}] nudge #{nudge_count} — idle {idle_before:.1f}s → {idle_after:.1f}s  [OK]", flush=True)
+            print(f"  [{ts}] {mode} #{nudge_count} — idle {idle_before:.1f}s → {idle_after:.1f}s  [OK]", flush=True)
         else:
-            print(f"  [{ts}] nudge #{nudge_count} — idle {idle_before:.1f}s → {idle_after:.1f}s  [FAILED — check Accessibility permission]", flush=True)
+            print(f"  [{ts}] {mode} #{nudge_count} — idle {idle_before:.1f}s → {idle_after:.1f}s  [FAILED — check Accessibility permission]", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -159,16 +248,32 @@ def main():
     parser.add_argument(
         "--interval",
         type=int,
-        default=120,
+        default=30,
         metavar="SEC",
-        help="Seconds between mouse nudges (default: 120)",
+        help="Seconds between mouse nudges (default: 30)",
+    )
+    parser.add_argument(
+        "--human",
+        action="store_true",
+        help="Move mouse naturally across the full screen (Bezier path, variable speed, jitter)",
+    )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=None,
+        metavar="SEC",
+        help="Stop automatically after this many seconds (default: run until Ctrl+C)",
     )
     args = parser.parse_args()
 
+    mode_label = "human (Bezier)" if args.human else "nudge (small offset)"
+    duration_label = f"{args.duration}s" if args.duration else "until Ctrl+C"
     print("=" * 50)
     print("  stay_active — system awake + staying active")
     print("=" * 50)
+    print(f"  Mode           : {mode_label}")
     print(f"  Nudge interval : every {args.interval}s")
+    print(f"  Duration       : {duration_label}")
     print("  Press Ctrl+C to stop.")
     print("-" * 50)
 
@@ -182,7 +287,7 @@ def main():
     stop_event = threading.Event()
     thread = threading.Thread(
         target=activity_loop,
-        args=(stop_event, args.interval),
+        args=(stop_event, args.interval, args.human),
         daemon=True,
     )
     thread.start()
@@ -198,9 +303,13 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    # Keep the main thread alive.
-    while True:
-        time.sleep(1)
+    # Keep the main thread alive; honour --duration if set.
+    if args.duration:
+        stop_event.wait(args.duration)
+        shutdown(None, None)
+    else:
+        while True:
+            time.sleep(1)
 
 
 if __name__ == "__main__":
