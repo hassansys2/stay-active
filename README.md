@@ -13,28 +13,40 @@ Keeps your Mac awake and your status showing as **active** — even when you ste
 | `caffeinate -i` | Prevents idle system sleep; display can still sleep normally |
 | Mouse nudge | Posts a real `CGEventMouseMoved` event every N seconds, resetting the OS idle timer |
 
-The nudge moves the cursor by a small random amount (3–8px) and back. The offset and timing are randomised so it doesn't look like a robot. The cursor returns to its original position, so you won't notice it.
+Two nudge modes are available:
+
+| Mode | Behaviour |
+|---|---|
+| Default | Moves cursor 3–8px in a random direction and back; cursor returns to its original position |
+| `--human` | Moves cursor to a random screen location along a Bezier curve with easing, micro-jitter, and occasional stutters — indistinguishable from real hand movement |
 
 ## Requirements
 
 - macOS (uses Quartz / CoreGraphics — built into macOS)
 - Python 3 (pre-installed on macOS)
 
-## Setup
+## Setup & run
 
-### Option 1 — setup script (recommended)
+```bash
+./run.sh
+```
+
+That's it. `run.sh` automatically creates the venv and installs dependencies if needed, then starts the script. All arguments pass through:
+
+```bash
+./run.sh --human                          # human-like Bezier movement
+./run.sh --interval 60                    # nudge every 60s (default: 30s)
+./run.sh --duration 3600                  # stop after 1 hour (default: indefinite)
+./run.sh --human --interval 60 --duration 7200
+```
+
+Press `Ctrl+C` to stop. `caffeinate` is cleanly terminated and normal sleep behaviour is restored.
+
+### Manual setup (alternative)
 
 ```bash
 bash setup.sh
-```
-
-This creates a `venv/`, upgrades pip, and installs all dependencies from `requirements.txt`.
-
-### Option 2 — manual
-
-```bash
-python3 -m venv venv
-venv/bin/pip install -r requirements.txt
+venv/bin/python3 stay_active.py --human
 ```
 
 ### Accessibility permission
@@ -49,20 +61,13 @@ To grant it manually:
 3. Enable the toggle next to it
 4. Re-run the script
 
-## Usage
+## Options
 
-```bash
-# Default — nudge every 2 minutes
-venv/bin/python3 stay_active.py
-
-# Custom interval (seconds)
-venv/bin/python3 stay_active.py --interval 60
-
-# Help
-venv/bin/python3 stay_active.py --help
-```
-
-Press `Ctrl+C` to stop. `caffeinate` is cleanly terminated and normal sleep behaviour is restored.
+| Flag | Default | Description |
+|---|---|---|
+| `--human` | off | Human-like Bezier movement across the full screen |
+| `--interval SEC` | `30` | Seconds between nudges |
+| `--duration SEC` | indefinite | Auto-stop after this many seconds |
 
 ## Output
 
@@ -70,16 +75,16 @@ Press `Ctrl+C` to stop. `caffeinate` is cleanly terminated and normal sleep beha
 ==================================================
   stay_active — system awake + staying active
 ==================================================
-  Nudge interval : every 120s
+  Mode           : human (Bezier)
+  Nudge interval : every 30s
+  Duration       : until Ctrl+C
   Press Ctrl+C to stop.
 --------------------------------------------------
   Checking Accessibility permission... OK
   caffeinate PID : 12345
-  [09:46:29] nudge #1 — idle 120.3s → 0.3s  [OK]
-  [09:48:29] nudge #2 — idle 120.3s → 0.3s  [OK]
+  [09:46:29] human #1 — idle 30.3s → 0.1s  [OK]
+  [09:47:00] human #2 — idle 30.2s → 0.1s  [OK]
 ```
-
-Each nudge line shows the idle time before and after:
 
 | Status | Meaning |
 |---|---|
@@ -89,8 +94,9 @@ Each nudge line shows the idle time before and after:
 ## Files
 
 ```
+run.sh            # entry point — use this to run the script
 stay_active.py    # main script
+setup.sh          # one-shot venv setup
 requirements.txt  # Python dependencies
-setup.sh          # one-shot setup script
 venv/             # created by setup — not committed
 ```
